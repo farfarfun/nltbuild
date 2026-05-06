@@ -1,8 +1,10 @@
 #!/usr/bin/python3
 
+import shlex
+
 from funshell import run_shell, run_shell_list
 
-from .util import logger
+from .util import logger, opencommit_commit
 
 
 class BaseBuild:
@@ -74,7 +76,11 @@ class BaseBuild:
         """推送代码"""
         logger.info(f"{self.name} push")
         run_shell_list(["git add -A"])
-        run_shell_list(["aicommits --yes"])
+        try:
+            if not opencommit_commit(message):
+                run_shell_list([f"git commit -m {shlex.quote(message)}"])
+        except Exception as e:
+            logger.warning(f"commit skipped or failed: {e}")
         run_shell_list(["git push"])
 
     def install(self, *args, **kwargs):
@@ -96,6 +102,7 @@ class BaseBuild:
     def clean_history(self, *args, **kwargs):
         """清理git历史记录"""
         logger.info(f"{self.name} clean history")
+        current_branch = run_shell("git rev-parse --abbrev-ref HEAD", printf=False).strip() or "master"
         run_shell_list(
             [
                 "git tag -d $(git tag -l) || true",
@@ -105,10 +112,10 @@ class BaseBuild:
                 "git checkout --orphan latest_branch",
                 "git add -A",
                 'git commit -am "clear history"',
-                "git branch -D master",
-                "git branch -m master",
-                "git push -f origin master",
-                "git push --set-upstream origin master",
+                f"git branch -D {current_branch} || true",
+                f"git branch -m {current_branch}",
+                f"git push -f origin {current_branch}",
+                f"git push --set-upstream origin {current_branch}",
                 f"echo {self.name} success",
             ]
         )
@@ -120,16 +127,19 @@ class BaseBuild:
             [
                 "git rm -r --cached .",
                 "git add .",
-                "git commit -m 'update .gitignore'",
+                "git commit -m 'update .gitignore' || true",
                 "git gc --aggressive",
             ]
         )
 
     def tags(self, *args, **kwargs):
         """创建版本标签"""
+        if not self.version:
+            logger.warning("skip tags: version is not set")
+            return
         run_shell_list(
             [
-                f"git tag v{self.version}",
+                f"git tag --force v{self.version}",
                 "git push --tags",
             ]
         )

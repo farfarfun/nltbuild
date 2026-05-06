@@ -122,15 +122,20 @@ class UVBuild(BaseBuild):
     def _cmd_publish(self) -> list[str]:
         """发布命令: 按各包构建产物目录分别 uv publish。"""
         config = ConfigParser()
+        pypirc = os.path.expanduser("~/.pypirc")
+        server = "pypi"
+        if os.path.exists(pypirc):
+            config.read(pypirc)
+            if config.has_section("distutils") and "index-servers" in config["distutils"]:
+                servers = config["distutils"]["index-servers"].strip().split()
+                if servers:
+                    server = servers[0]
 
-        config.read(f"{os.environ['HOME']}/.pypirc")
-
-        server = config["distutils"]["index-servers"].strip().split()[0]
         if os.path.exists(self.toml_paths[0]):
             a = toml.load(self.toml_paths[0])
             server = deep_get(a, "tool", "uv", "index", 0, "name") or server
         logger.info(f"public server: {server}")
-        settings = config[server]
+        settings = config[server] if config.has_section(server) else {}
         opts: list[str] = []
         if user := settings.get("username"):
             password = settings.get("password")

@@ -48,6 +48,26 @@ class NpmFrontendBuild(BaseBuild):
         has_build = isinstance(scripts, dict) and "build" in scripts
         return bool(has_build or custom_build)
 
+    @staticmethod
+    def _collect_package_json_paths_in_root(root: str) -> list[str]:
+        paths: list[str] = []
+        if not os.path.isdir(root):
+            return paths
+        for name in sorted(os.listdir(root)):
+            sub = os.path.join(root, name)
+            if not os.path.isdir(sub):
+                continue
+            pj = os.path.join(sub, "package.json")
+            if not os.path.isfile(pj):
+                continue
+            try:
+                pkg = NpmFrontendBuild._load_json_at(pj)
+                if NpmFrontendBuild._package_qualifies(pkg):
+                    paths.append(pj)
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning(f"skip {pj}: {e}")
+        return paths
+
     def _collect_package_json_paths(self) -> list[str]:
         paths: list[str] = []
         if os.path.isfile(self.ROOT_PACKAGE_JSON):
@@ -57,28 +77,17 @@ class NpmFrontendBuild(BaseBuild):
                     paths.append(self.ROOT_PACKAGE_JSON)
             except (OSError, json.JSONDecodeError) as e:
                 logger.warning(f"skip root package.json: {e}")
-        ext_root = "extbuild"
-        if os.path.isdir(ext_root):
-            for name in sorted(os.listdir(ext_root)):
-                sub = os.path.join(ext_root, name)
-                if not os.path.isdir(sub):
-                    continue
-                pj = os.path.join(sub, "package.json")
-                if not os.path.isfile(pj):
-                    continue
-                try:
-                    pkg = self._load_json_at(pj)
-                    if self._package_qualifies(pkg):
-                        paths.append(pj)
-                except (OSError, json.JSONDecodeError) as e:
-                    logger.warning(f"skip {pj}: {e}")
+        paths.extend(self._collect_package_json_paths_in_root("extbuild"))
+        paths.extend(self._collect_package_json_paths_in_root("exts"))
         return paths
 
     def _detect_package_manager_for_dir(self, pkg_dir: str, cfg: dict) -> str:
-        """推断包管理器: 显式配置 > pnpm > npm > yarn。"""
+        """推断包管理器: 显式配置 > packageManager 字段 > lockfile。"""
         pm = cfg.get("packageManager")
-        if pm in ("npm", "pnpm", "yarn"):
-            return pm
+        if isinstance(pm, str):
+            pm_base = pm.split("@", 1)[0].strip().lower()
+            if pm_base in ("npm", "pnpm", "yarn"):
+                return pm_base
         if os.path.exists(os.path.join(pkg_dir, "pnpm-lock.yaml")):
             return "pnpm"
         if os.path.exists(os.path.join(pkg_dir, "package-lock.json")):
